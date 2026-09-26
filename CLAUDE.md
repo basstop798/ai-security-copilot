@@ -7,46 +7,71 @@
   Explain simply, one step at a time. Call out risks honestly and early.
 
 ## Fair play
-This project is written **fresh on 27 Sep**. Do NOT copy code from
-`C:\Users\abdel\Documents\recon-dashboard` (the user's older project). Only the prepared DATA
-in `prep/` (public CVE/CWE facts, a fictional sample scan) and the plan are reused, and this is
-declared on the project card.
+This project is written **fresh on 27 Sep**. Do NOT open or copy code from
+`C:\Users\abdel\Documents\recon-dashboard` (the user's older recon project). Ideas are fine;
+code is not. Only the prepared DATA in `prep/` (public CVE/CWE/RFC facts) and the plan are
+reused, and this is declared on the project card.
 
-## The project: AI Security Co-pilot
-Pitch: *an AI security co-pilot for small businesses and startups in Africa that can't afford
-a security team. Paste a raw scan (e.g. Nmap output) → get a ranked, plain-language report
-with cited, human-reviewed fixes.*
+## The project: AI Security Co-pilot (domain check)
+Pitch: *a security check for small businesses and non-technical owners in Africa. Type your
+website's domain, press one button, and get a plain-language report in Arabic, French or
+English — an action plan (Today / This week / This month) with cited, human-reviewed fixes.*
 
-Pipeline (build in this order — smallest working slice first):
-1. Paste raw scan → `/api/analyze` → LLM → report rendered as cards. (Sprint 1)
-2. Parse findings (port / service / version) from the log with plain code.
-3. Ground each finding against `prep/cve-kb.json` by keyword match — the model never invents CVEs.
-   Grounding must never downgrade severity.
-4. Redact IPs / emails / secrets before anything is sent to a model; show the count in the UI.
-5. Zod-validate model JSON; on failure re-ask once with the error (repair retry).
-6. Provider fallback: NVIDIA NIM → Gemini → Claude → deterministic local advisor (no key needed).
-7. Language selector (ar / fr / en): pass the language to the prompt; the model writes the
-   impact + fixes in that language. Arabic output must render right-to-left (`dir="rtl"`).
-   The deterministic fallback may stay in English — say so honestly.
-8. Action plan: bucket findings into Today (critical/high) / This week (medium) / This month
-   (low/info) — plain code, based on the grounded severity.
-9. UI polish: risk score 0–100, severity colours, "review before running" warning, citation
-   links, and a "Print / Save as PDF" button (browser `window.print()`) for the client report.
+- **User:** the small-business owner / beginner with no security team. No tools to install.
+- **Differentiators:** one-field UX, passive-only checks, grounded citations (no invented
+  CVEs), report language ar/fr/en, action plan by urgency, provider fallback.
+
+## Passive checks only (4 modules — no more)
+Everything a normal browser visit would do. **No port scanning, no Nmap, no brute force.**
+1. **HTTPS / certificate** — does https work, does http redirect to https, certificate issuer
+   and days until expiry (Node `tls.connect`, read `getPeerCertificate()`).
+2. **Security headers** — one GET of the homepage: HSTS, CSP, X-Frame-Options,
+   X-Content-Type-Options, Referrer-Policy.
+3. **Email spoofing** — DNS TXT: SPF (`v=spf1`, check `-all`/`~all`/`+all`) and DMARC
+   (`_dmarc.<domain>`, check `p=`). Use `node:dns/promises`.
+4. **Cookies** — `Set-Cookie` flags from the same GET: Secure, HttpOnly, SameSite.
+
+## Safety gates (must exist before any network call)
+- **Consent checkbox** (required): "I own this website or have permission to check it."
+  The API rejects requests without `consent: true`.
+- **Domain validation:** a public registrable hostname only (no IPs, no `localhost`, no ports,
+  no paths — strip `https://` and paths).
+- **SSRF guard:** resolve the domain; reject if ANY address is loopback, private (RFC1918),
+  link-local, CGNAT or cloud metadata (169.254.169.254). Use `redirect: 'manual'` and re-check
+  every redirect hop (max 3). Timeouts on every fetch (~8 s). Cap response body size.
+- Simple in-memory rate limit (e.g. 5 checks / minute per IP).
+
+## Pipeline (build in this order — smallest working slice first)
+1. Domain + consent → `/api/check` → run the 4 checks (plain code) → findings list. (Sprint 1)
+2. Ground each finding against `prep/cve-kb.json` by keyword match — the model never invents
+   CVEs. Grounding must never downgrade severity.
+3. LLM writes plain-language impact + fix steps in the chosen language (ar / fr / en).
+   Arabic output renders right-to-left (`dir="rtl"`). The model receives finding types, not
+   raw headers/cookie values.
+4. Zod-validate model JSON; on failure re-ask once with the error (repair retry).
+5. Provider fallback: NVIDIA NIM → Gemini → deterministic local advisor (no key needed;
+   may stay in English — say so honestly).
+6. Action plan: Today (critical/high) / This week (medium) / This month (low/info) — plain code.
+7. **Demo safety:** a saved result for the demo domain, served when the live check fails.
+8. UI polish: risk score 0–100, severity colours, "review with your web developer before
+   changing anything" warning, citation links, "Print / Save as PDF" (`window.print()`).
 
 Do NOT add features beyond this list — scope is the main risk.
 
 ## Stack
-- Next.js (App Router) + TypeScript + Tailwind, created with `create-next-app` in `./app-src`
-  or `./copilot`. Read `node_modules/next/dist/docs/` for the installed version first.
-- `zod`, `openai` (for NVIDIA NIM's OpenAI-compatible API), `@google/generative-ai`,
-  `@anthropic-ai/sdk`, Vitest.
+- Next.js (App Router) + TypeScript + Tailwind via `create-next-app` in `./app`
+  sub-folder or the repo root. Read `node_modules/next/dist/docs/` for the installed version
+  before writing framework code. Route handlers that use `dns`/`tls` run on the Node runtime.
+- `zod`, `openai` (for NVIDIA NIM's OpenAI-compatible API), `@google/generative-ai`, Vitest.
 - NVIDIA NIM: base URL `https://integrate.api.nvidia.com/v1`, key in `NVIDIA_API_KEY`,
   model id copied from build.nvidia.com (e.g. a Llama / Nemotron instruct model).
+- Gemini key in `GEMINI_API_KEY`.
 
 ## Rules
 - Keys only in `.env.local` (gitignored). Never commit, print or paste keys.
 - Commit after every working step.
-- Tests + lint + build must pass before calling anything done.
+- Tests (validation, SSRF guard, SPF/DMARC parsing, grounding, schema) + lint + build must
+  pass before calling anything done.
 - Submission closes **17:30 Tunis time** (not 20:00). Stop coding by ~16:15.
 
-See `PLAN.md` for the schedule, demo script and project card.
+See `PLAN.md` for the schedule, demo script and project card; `QA.md` for judge questions.
