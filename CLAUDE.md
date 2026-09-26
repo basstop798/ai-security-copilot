@@ -25,7 +25,15 @@ Pipeline (build in this order — smallest working slice first):
 4. Redact IPs / emails / secrets before anything is sent to a model; show the count in the UI.
 5. Zod-validate model JSON; on failure re-ask once with the error (repair retry).
 6. Provider fallback: NVIDIA NIM → Gemini → Claude → deterministic local advisor (no key needed).
-7. UI polish: risk score 0–100, severity colours, "review before running" warning, citation links.
+7. Language selector (ar / fr / en): pass the language to the prompt; the model writes the
+   impact + fixes in that language. Arabic output must render right-to-left (`dir="rtl"`).
+   The deterministic fallback may stay in English — say so honestly.
+8. Action plan: bucket findings into Today (critical/high) / This week (medium) / This month
+   (low/info) — plain code, based on the grounded severity.
+9. UI polish: risk score 0–100, severity colours, "review before running" warning, citation
+   links, and a "Print / Save as PDF" button (browser `window.print()`) for the client report.
+
+Do NOT add features beyond this list — scope is the main risk.
 
 ## Stack
 - Next.js (App Router) + TypeScript + Tailwind, created with `create-next-app` in `./app-src`
