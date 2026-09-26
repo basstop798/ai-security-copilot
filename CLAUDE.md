@@ -34,6 +34,9 @@ Everything a normal browser visit would do. **No port scanning, no Nmap, no brut
 ## Safety gates (must exist before any network call)
 - **Consent checkbox** (required): "I own this website or have permission to check it."
   The API rejects requests without `consent: true`.
+- **Demo targets:** the user owns no domain. Demo only on public, intentionally-vulnerable
+  test sites listed in `prep/demo-targets.md` (main: `demo.testfire.net`). Add one-click
+  "Try a test site" buttons for them in the UI. Save a cached result per target for offline demo.
 - **Domain validation:** a public registrable hostname only (no IPs, no `localhost`, no ports,
   no paths — strip `https://` and paths).
 - **SSRF guard:** resolve the domain; reject if ANY address is loopback, private (RFC1918),
@@ -68,6 +71,9 @@ Do NOT add features beyond this list — scope is the main risk.
 - Gemini key in `GEMINI_API_KEY`.
 
 ## Rules
+- **DNS on this PC:** Node's system resolver is `127.0.0.1` and refuses connections, so
+  `dns.resolveTxt()` fails. Use `new dns.Resolver()` + `setServers(['1.1.1.1','8.8.8.8'])`
+  for the SPF/DMARC check (configurable via `DNS_SERVERS` env). Verified 26 Sep.
 - Keys only in `.env.local` (gitignored). Never commit, print or paste keys.
 - Commit after every working step.
 - Tests (validation, SSRF guard, SPF/DMARC parsing, grounding, schema) + lint + build must
