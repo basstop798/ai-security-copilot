@@ -23,6 +23,7 @@ const UI_TEXT: Record<ReportLanguage, Record<string, string>> = {
     poweredBy: 'مصدر الذكاء الاصطناعي',
     demoNotice: 'هذه نتيجة محفوظة (الفحص المباشر فشل أو الهدف موقع اختبار).',
     reviewNotice: 'راجع هذه الحلول مع مطوّر موقعك قبل التنفيذ.',
+    printButton: 'اطبع / احفظ كـ PDF',
   },
   fr: {
     title: 'Copilote de sécurité IA',
@@ -41,6 +42,7 @@ const UI_TEXT: Record<ReportLanguage, Record<string, string>> = {
     poweredBy: 'Fournisseur IA',
     demoNotice: 'Résultat enregistré (la vérification en direct a échoué ou la cible est un site de test).',
     reviewNotice: 'Vérifiez ces corrections avec votre développeur avant de les appliquer.',
+    printButton: 'Imprimer / Enregistrer en PDF',
   },
   en: {
     title: 'AI Security Co-pilot',
@@ -59,6 +61,7 @@ const UI_TEXT: Record<ReportLanguage, Record<string, string>> = {
     poweredBy: 'AI provider',
     demoNotice: 'Saved result (the live check failed, or the target is a test site).',
     reviewNotice: 'Review these fixes with your web developer before applying them.',
+    printButton: 'Print / Save as PDF',
   },
 };
 
@@ -128,7 +131,7 @@ export default function Home() {
         <p className="mt-2 text-sm text-zinc-400">{t.subtitle}</p>
       </header>
 
-      <div className={cx(CARD, 'p-5')}>
+      <div className={cx(CARD, 'p-5 print:hidden')}>
         <div className="mb-4 flex justify-center gap-2">
           {(['ar', 'fr', 'en'] as ReportLanguage[]).map((lng) => (
             <button
@@ -197,10 +200,14 @@ export default function Home() {
         </div>
       </div>
 
-      {loading && <CheckingProgress language={language} />}
+      {loading && (
+        <div className="print:hidden">
+          <CheckingProgress language={language} />
+        </div>
+      )}
 
       {error && (
-        <div className="rounded-lg bg-rose-500/10 p-4 text-sm text-rose-300 ring-1 ring-rose-500/20 ring-inset">
+        <div className="print:hidden rounded-lg bg-rose-500/10 p-4 text-sm text-rose-300 ring-1 ring-rose-500/20 ring-inset">
           {error}
         </div>
       )}
@@ -213,11 +220,20 @@ export default function Home() {
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-4">
-            <RiskGauge score={result.report.riskScore} label={t.riskScore} />
-            <div className="text-xs text-zinc-500">
-              {t.poweredBy}: <span className="font-mono text-zinc-400">{result.meta.aiProvider}</span>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <RiskGauge score={result.report.riskScore} label={t.riskScore} />
+              <div className="text-xs text-zinc-500">
+                {t.poweredBy}: <span className="font-mono text-zinc-400">{result.meta.aiProvider}</span>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="print:hidden rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-300 ring-1 ring-white/10 ring-inset transition-colors hover:bg-white/10"
+            >
+              {t.printButton}
+            </button>
           </div>
 
           <CategorySummary findings={result.report.findings} language={language} />

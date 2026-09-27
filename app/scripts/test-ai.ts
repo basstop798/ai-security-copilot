@@ -1,4 +1,3 @@
-import { groundFindings } from '../lib/grounding';
 import { writeReport } from '../lib/ai';
 import { computeRiskScore, buildActionPlan } from '../lib/score';
 import { DEMO_GROUNDED_FINDINGS, DEMO_DOMAIN } from '../lib/demo-data';

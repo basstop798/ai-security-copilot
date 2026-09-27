@@ -9,6 +9,7 @@
 import * as tls from 'node:tls';
 import { Resolver } from 'node:dns';
 import type { Finding } from './types';
+import { assertPublicHostname } from './validate';
 
 const DNS_SERVERS = (process.env.DNS_SERVERS || '1.1.1.1,8.8.8.8')
   .split(',')
@@ -42,6 +43,7 @@ export async function checkTls(hostname: string): Promise<Finding[]> {
   const tlsResult = await new Promise<{
     ok: boolean;
     daysRemaining?: number;
+    issuer?: string;
     error?: string;
   }>((resolve) => {
     const socket = tls.connect(
@@ -51,7 +53,9 @@ export async function checkTls(hostname: string): Promise<Finding[]> {
         const daysRemaining = cert?.valid_to
           ? Math.round((Date.parse(cert.valid_to) - Date.now()) / 86_400_000)
           : undefined;
-        resolve({ ok: true, daysRemaining });
+        const issuerRaw = cert?.issuer?.O || cert?.issuer?.CN;
+        const issuer = Array.isArray(issuerRaw) ? issuerRaw[0] : issuerRaw;
+        resolve({ ok: true, daysRemaining, issuer });
         socket.end();
       },
     );
@@ -71,24 +75,66 @@ export async function checkTls(hostname: string): Promise<Finding[]> {
       detail: `Could not establish a TLS connection on port 443 (${tlsResult.error ?? 'unknown error'}).`,
     });
   } else if (typeof tlsResult.daysRemaining === 'number' && tlsResult.daysRemaining < 0) {
+    const issuerText = tlsResult.issuer ? ` (issued by ${tlsResult.issuer})` : '';
     findings.push({
       id: 'tls-cert-expired',
       category: 'tls',
       severity: 'critical',
       title: 'TLS certificate has expired',
-      detail: `Certificate expired ${Math.abs(tlsResult.daysRemaining)} day(s) ago.`,
+      detail: `Certificate${issuerText} expired ${Math.abs(tlsResult.daysRemaining)} day(s) ago.`,
     });
   } else if (typeof tlsResult.daysRemaining === 'number' && tlsResult.daysRemaining < 30) {
+    const issuerText = tlsResult.issuer ? ` (issued by ${tlsResult.issuer})` : '';
     findings.push({
       id: 'tls-cert-expiring-soon',
       category: 'tls',
       severity: 'medium',
       title: 'TLS certificate expires soon',
-      detail: `Certificate expires in ${tlsResult.daysRemaining} day(s).`,
+      detail: `Certificate${issuerText} expires in ${tlsResult.daysRemaining} day(s).`,
     });
   }
 
   return findings;
+}
+
+/**
+ * Does visiting the site over plain HTTP redirect to HTTPS? A separate
+ * signal from checkTls (which only tests port 443 directly): a site can have
+ * a perfectly valid certificate and still serve real content unencrypted to
+ * anyone who types the address without "https://". Silent (no finding) if
+ * HTTP itself isn't reachable at all — that's not this check's concern.
+ */
+export async function checkHttpRedirect(hostname: string): Promise<Finding[]> {
+  let response: Response;
+  try {
+    response = await fetchOnce(`http://${hostname}/`);
+  } catch {
+    return [];
+  }
+
+  const location = response.headers.get('location');
+  const isRedirect = response.status >= 300 && response.status < 400 && !!location;
+  const redirectsToHttps =
+    isRedirect &&
+    (() => {
+      try {
+        return new URL(location!, `http://${hostname}/`).protocol === 'https:';
+      } catch {
+        return false;
+      }
+    })();
+
+  if (redirectsToHttps) return [];
+
+  return [
+    {
+      id: 'tls-http-not-redirected',
+      category: 'tls',
+      severity: 'medium',
+      title: 'HTTP does not redirect to HTTPS',
+      detail: `Visiting http://${hostname}/ returned status ${response.status} instead of redirecting to https:// — visitors who type the address without "https" may load the site unencrypted.`,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -103,18 +149,74 @@ const REQUIRED_HEADERS: { header: string; id: string }[] = [
   { header: 'referrer-policy', id: 'header-missing-referrer-policy' },
 ];
 
+const MAX_REDIRECT_HOPS = 3;
+
+function fetchOnce(url: string): Promise<Response> {
+  return fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(8000) });
+}
+
+/**
+ * Follow up to MAX_REDIRECT_HOPS redirects starting at `startUrl`, re-running
+ * the SSRF guard on every hop's hostname BEFORE requesting it — a redirect
+ * (e.g. bare domain -> www, or http -> https) could otherwise point at an
+ * internal address after the first, already-validated hop. See CLAUDE.md
+ * "SSRF guard": "re-check every redirect hop (max 3)".
+ *
+ * Returns null (never a partial/redirect response) if any hop fails to
+ * resolve, resolves to a private address, errors, or the chain exceeds the
+ * hop limit — callers already treat null as "this protocol didn't work".
+ */
+async function fetchFollowingRedirects(
+  startUrl: string,
+): Promise<{ response: Response; finalUrl: string } | null> {
+  let url = startUrl;
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      return null;
+    }
+
+    try {
+      await assertPublicHostname(hostname);
+    } catch {
+      return null;
+    }
+
+    let response: Response;
+    try {
+      response = await fetchOnce(url);
+    } catch {
+      return null;
+    }
+
+    const location = response.headers.get('location');
+    const isRedirect = response.status >= 300 && response.status < 400 && !!location;
+
+    if (!isRedirect) {
+      return { response, finalUrl: url };
+    }
+    if (hop === MAX_REDIRECT_HOPS) {
+      return null; // too many redirects — treat like an unreachable homepage
+    }
+    try {
+      url = new URL(location, url).toString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function fetchHomepage(
   hostname: string,
 ): Promise<{ response: Response; usedHttps: boolean } | null> {
   for (const proto of ['https', 'http'] as const) {
-    try {
-      const response = await fetch(`${proto}://${hostname}/`, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(8000),
-      });
-      return { response, usedHttps: proto === 'https' };
-    } catch {
-      // try next protocol
+    const result = await fetchFollowingRedirects(`${proto}://${hostname}/`);
+    if (result) {
+      return { response: result.response, usedHttps: new URL(result.finalUrl).protocol === 'https:' };
     }
   }
   return null;
@@ -294,11 +396,12 @@ export async function checkCookies(
 
 export async function runAllChecks(hostname: string): Promise<Finding[]> {
   const homepage = await fetchHomepage(hostname);
-  const [tlsFindings, headerFindings, emailFindings, cookieFindings] = await Promise.all([
+  const [tlsFindings, httpRedirectFindings, headerFindings, emailFindings, cookieFindings] = await Promise.all([
     checkTls(hostname),
+    checkHttpRedirect(hostname),
     checkHeaders(hostname, homepage),
     checkEmailAuth(hostname),
     checkCookies(hostname, homepage),
   ]);
-  return [...tlsFindings, ...headerFindings, ...emailFindings, ...cookieFindings];
+  return [...tlsFindings, ...httpRedirectFindings, ...headerFindings, ...emailFindings, ...cookieFindings];
 }
