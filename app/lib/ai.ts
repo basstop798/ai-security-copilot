@@ -59,17 +59,22 @@ async function callNvidia(findings: Finding[], language: ReportLanguage): Promis
   return text;
 }
 
-async function callGemini(findings: Finding[], language: ReportLanguage): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+// Tried in order. A model whose daily free-tier quota is exhausted returns a
+// 429 with "quota" in the message — that's a per-(project, model) cap, so a
+// different model id gets its own separate quota and is worth trying before
+// giving up on Gemini entirely. Overridable for whenever these get retired.
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.7-flash',
+  process.env.GEMINI_FALLBACK_MODEL_2 || 'gemini-3.6-flash',
+];
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
-  const prompt = buildPrompt(findings, language);
+async function callGeminiModel(genAI: GoogleGenerativeAI, modelName: string, prompt: string): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: modelName });
 
   // The hosted free tier returns transient 503/429 under load (verified on
   // hackathon day: intermittent "high demand" errors). Retry twice with a
-  // short backoff before giving up to the next provider in the chain.
+  // short backoff before giving up on this model.
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -79,12 +84,38 @@ async function callGemini(findings: Finding[], language: ReportLanguage): Promis
       return text;
     } catch (err) {
       lastError = err as Error;
+      const quotaExceeded = /quota/i.test(lastError.message);
+      if (quotaExceeded) {
+        console.error(`[ai] gemini model "${modelName}" quota exceeded, not retrying this model:`, lastError.message);
+        throw lastError; // daily cap — retrying the same model won't help.
+      }
       const transient = /503|429|overloaded|high demand/i.test(lastError.message);
       if (!transient || attempt === 2) throw lastError;
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
   }
   throw lastError ?? new Error('Gemini call failed');
+}
+
+async function callGeminiPrompt(prompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  let lastError: Error | undefined;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      return await callGeminiModel(genAI, modelName, prompt);
+    } catch (err) {
+      lastError = err as Error;
+      console.error(`[ai] gemini model "${modelName}" failed:`, lastError.message);
+    }
+  }
+  throw lastError ?? new Error('Gemini call failed');
+}
+
+async function callGemini(findings: Finding[], language: ReportLanguage): Promise<string> {
+  return callGeminiPrompt(buildPrompt(findings, language));
 }
 
 /** Strip a ```json ... ``` fence if the model added one despite instructions. */
@@ -144,6 +175,7 @@ export async function writeReport(findings: Finding[], language: ReportLanguage)
         assertKnownFindingIds(parsed.data, knownIds);
         return { report: parsed.data, provider: attempt.name };
       }
+      console.error(`[ai] ${attempt.name} returned invalid JSON, attempting one repair retry:`, parsed.error);
       // one repair retry, feeding the validation error back
       const repairPrompt = `${buildPrompt(findings, language)}\n\nYour previous response was invalid: ${parsed.error}\nReturn ONLY the corrected JSON, no explanation.`;
       const raw2 =
@@ -155,11 +187,13 @@ export async function writeReport(findings: Finding[], language: ReportLanguage)
         assertKnownFindingIds(parsed2.data, knownIds);
         return { report: parsed2.data, provider: attempt.name };
       }
-    } catch {
-      // fall through to the next provider
+      console.error(`[ai] ${attempt.name} repair retry also returned invalid JSON, moving to next provider:`, parsed2.error);
+    } catch (err) {
+      console.error(`[ai] ${attempt.name} provider failed, moving to next provider:`, (err as Error).message);
     }
   }
 
+  console.error('[ai] all providers failed or are unconfigured — falling back to the local template advisor');
   return { report: localAdvisor(findings, language), provider: 'local' };
 }
 
@@ -180,12 +214,5 @@ async function callNvidiaRaw(prompt: string): Promise<string> {
 }
 
 async function callGeminiRaw(prompt: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  if (!text) throw new Error('Gemini returned an empty response');
-  return text;
+  return callGeminiPrompt(prompt);
 }
