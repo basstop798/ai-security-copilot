@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CARD, CheckingProgress, Panel, RiskGauge, SeverityBadge, cx } from './components/ui';
+import { CARD, CategorySummary, CheckingProgress, Panel, RiskGauge, SeverityBadge, cx } from './components/ui';
 import { DEMO_DOMAIN } from '@/lib/demo-data';
 import type { CopilotReport, ReportLanguage } from '@/lib/types';
 
@@ -202,6 +202,8 @@ export default function Home() {
               {t.poweredBy}: <span className="font-mono text-zinc-400">{result.meta.aiProvider}</span>
             </div>
           </div>
+
+          <CategorySummary findings={result.report.findings} language={language} />
 
           <Panel title={t.today}>
             <ActionList items={result.report.actionPlan.today} empty="—" />

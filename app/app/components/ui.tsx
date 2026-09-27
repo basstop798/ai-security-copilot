@@ -158,3 +158,58 @@ export function Spinner() {
     />
   );
 }
+
+const CATEGORY_LABELS: Record<'tls' | 'headers' | 'email' | 'cookies', Record<'ar' | 'fr' | 'en', string>> = {
+  tls: { ar: 'الشهادة والتشفير', fr: 'Certificat & chiffrement', en: 'Certificate & encryption' },
+  headers: { ar: 'رؤوس الأمان', fr: 'En-têtes de sécurité', en: 'Security headers' },
+  email: { ar: 'حماية البريد', fr: 'Protection email', en: 'Email protection' },
+  cookies: { ar: 'الكوكيز', fr: 'Cookies', en: 'Cookies' },
+};
+
+const CATEGORY_ORDER = ['tls', 'headers', 'email', 'cookies'] as const;
+
+/**
+ * 4-category summary strip: shows, at a glance, which of the 4 passive
+ * checks found something and how bad the worst finding in each was.
+ * Purely derived from the findings array already in the report — no new
+ * backend data needed.
+ */
+export function CategorySummary({
+  findings,
+  language,
+}: {
+  findings: { category: 'tls' | 'headers' | 'email' | 'cookies'; severity: Severity }[];
+  language: 'ar' | 'fr' | 'en';
+}) {
+  const SEVERITY_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {CATEGORY_ORDER.map((cat) => {
+        const matches = findings.filter((f) => f.category === cat);
+        const worst = matches.reduce<Severity | null>((acc, f) => {
+          if (!acc || SEVERITY_RANK[f.severity] > SEVERITY_RANK[acc]) return f.severity;
+          return acc;
+        }, null);
+        const clean = matches.length === 0;
+        const style = worst ? SEVERITY_STYLES[worst] : null;
+
+        return (
+          <div
+            key={cat}
+            className={cx(
+              CARD,
+              'flex flex-col items-center gap-1.5 px-3 py-3 text-center',
+              clean && 'ring-1 ring-emerald-500/20',
+            )}
+          >
+            <span className={cx('text-lg', clean ? 'text-emerald-400' : style?.text)}>
+              {clean ? '✓' : matches.length}
+            </span>
+            <span className="text-[11px] leading-tight text-zinc-400">{CATEGORY_LABELS[cat][language]}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
