@@ -1,13 +1,18 @@
 /**
- * Deterministic grounding: attach a real citation (from prep/cve-kb.json)
+ * Deterministic grounding: attach a real citation (from cve-kb.json)
  * to each raw Finding by keyword matching. The LLM never invents CVEs or
  * decides severity — grounding can only ever RAISE severity, never lower it
  * (worstOf), because the underlying check already observed the problem.
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Finding, Severity } from './types';
+// Statically imported (not readFileSync'd from a repo-root path) so it gets
+// bundled into the serverless function and works on Vercel, where only
+// app/ is deployed — a relative-path readFileSync into ../prep would 404
+// with ENOENT in production even though it works when run locally from a
+// full git checkout. This file is a build-time copy of prep/cve-kb.json;
+// see CLAUDE.md "Keep in sync" note if the source KB changes.
+import kbData from './cve-kb.json';
 
 type KbEntry = {
   id: string;
@@ -38,10 +43,7 @@ let cachedKb: KbEntry[] | null = null;
 
 function loadKb(): KbEntry[] {
   if (cachedKb) return cachedKb;
-  // prep/cve-kb.json lives at the repo root, two levels up from app/lib/.
-  const path = join(process.cwd(), '..', 'prep', 'cve-kb.json');
-  const raw = readFileSync(path, 'utf-8');
-  cachedKb = JSON.parse(raw) as KbEntry[];
+  cachedKb = kbData as KbEntry[];
   return cachedKb;
 }
 
