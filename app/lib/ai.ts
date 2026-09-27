@@ -64,11 +64,27 @@ async function callGemini(findings: Finding[], language: ReportLanguage): Promis
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-  const result = await model.generateContent(buildPrompt(findings, language));
-  const text = result.response.text();
-  if (!text) throw new Error('Gemini returned an empty response');
-  return text;
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
+  const prompt = buildPrompt(findings, language);
+
+  // The hosted free tier returns transient 503/429 under load (verified on
+  // hackathon day: intermittent "high demand" errors). Retry twice with a
+  // short backoff before giving up to the next provider in the chain.
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      if (!text) throw new Error('Gemini returned an empty response');
+      return text;
+    } catch (err) {
+      lastError = err as Error;
+      const transient = /503|429|overloaded|high demand/i.test(lastError.message);
+      if (!transient || attempt === 2) throw lastError;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
+  throw lastError ?? new Error('Gemini call failed');
 }
 
 /** Strip a ```json ... ``` fence if the model added one despite instructions. */
@@ -167,7 +183,7 @@ async function callGeminiRaw(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.8-flash' });
   const result = await model.generateContent(prompt);
   const text = result.response.text();
   if (!text) throw new Error('Gemini returned an empty response');
