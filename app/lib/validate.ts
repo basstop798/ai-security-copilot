@@ -52,9 +52,17 @@ function lookup(resolver: Resolver, hostname: string, family: 4 | 6): Promise<st
 export function isPrivateOrReservedIp(ip: string): boolean {
   if (ip === '169.254.169.254') return true; // cloud metadata
   if (ip.includes(':')) {
-    // IPv6: loopback, unique local (fc00::/7), link-local (fe80::/10)
+    // IPv6: loopback, unique local (fc00::/7 = fc/fd), link-local (fe80::/10
+    // = second hex nibble 8-b, i.e. fe8x/fe9x/feax/febx — NOT the wider "fe"
+    // prefix, which would wrongly also reject the deprecated-but-public
+    // fec0::/fed0::/fee0::/fef0:: site-local block).
     const lower = ip.toLowerCase();
-    return lower === '::1' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80');
+    return (
+      lower === '::1' ||
+      lower.startsWith('fc') ||
+      lower.startsWith('fd') ||
+      /^fe[89ab]/.test(lower)
+    );
   }
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true; // malformed -> reject

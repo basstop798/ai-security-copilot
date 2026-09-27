@@ -20,7 +20,9 @@ export function computeRiskScore(severities: Severity[]): number {
 }
 
 /** Bucket findings by urgency: critical/high -> today, medium -> this week, low/info -> this month. */
-export function buildActionPlan(findings: Pick<GroundedFinding, 'severity' | 'title' | 'fix'>[]): ActionPlan {
+export function buildActionPlan(
+  findings: (Pick<GroundedFinding, 'severity' | 'title'> & { fix?: string })[],
+): ActionPlan {
   const plan: ActionPlan = { today: [], thisWeek: [], thisMonth: [] };
   for (const f of findings) {
     const line = f.fix?.trim() ? f.fix : f.title;
