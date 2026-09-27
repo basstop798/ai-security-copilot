@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CARD, Panel, RiskGauge, SeverityBadge, Spinner, cx } from './components/ui';
+import { CARD, CheckingProgress, Panel, RiskGauge, SeverityBadge, cx } from './components/ui';
 import { DEMO_DOMAIN } from '@/lib/demo-data';
 import type { CopilotReport, ReportLanguage } from '@/lib/types';
 
@@ -161,7 +161,6 @@ export default function Home() {
             disabled={loading || !consent || !domain.trim()}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {loading && <Spinner />}
             {loading ? t.checking : t.checkButton}
           </button>
         </form>
@@ -181,6 +180,8 @@ export default function Home() {
         </div>
       </div>
 
+      {loading && <CheckingProgress language={language} />}
+
       {error && (
         <div className="rounded-lg bg-rose-500/10 p-4 text-sm text-rose-300 ring-1 ring-rose-500/20 ring-inset">
           {error}
@@ -196,7 +197,7 @@ export default function Home() {
           )}
 
           <div className="flex flex-wrap items-center gap-4">
-            <RiskGauge score={result.report.riskScore} />
+            <RiskGauge score={result.report.riskScore} label={t.riskScore} />
             <div className="text-xs text-zinc-500">
               {t.poweredBy}: <span className="font-mono text-zinc-400">{result.meta.aiProvider}</span>
             </div>

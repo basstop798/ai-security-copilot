@@ -62,12 +62,76 @@ export function SeverityBadge({ severity, language }: { severity: Severity; lang
   );
 }
 
-export function RiskGauge({ score }: { score: number }) {
-  const tone = score >= 70 ? 'text-rose-400' : score >= 40 ? 'text-amber-400' : 'text-emerald-400';
+export function RiskGauge({ score, label }: { score: number; label: string }) {
+  const tone =
+    score >= 70
+      ? { text: 'text-rose-400', ring: '#fb7185' }
+      : score >= 40
+        ? { text: 'text-amber-400', ring: '#fbbf24' }
+        : { text: 'text-emerald-400', ring: '#34d399' };
+
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, score));
+  const dashOffset = circumference * (1 - clamped / 100);
+
   return (
     <div className={cx(CARD, 'flex items-center gap-5 p-5')}>
-      <div className={cx('text-4xl font-bold tabular-nums', tone)}>{score}</div>
-      <div className="text-sm text-zinc-400">/ 100</div>
+      <svg width="96" height="96" viewBox="0 0 96 96" className="shrink-0 -rotate-90">
+        <circle cx="48" cy="48" r={radius} fill="none" stroke="currentColor" strokeWidth="8" className="text-white/10" />
+        <circle
+          cx="48"
+          cy="48"
+          r={radius}
+          fill="none"
+          stroke={tone.ring}
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+          style={{ transition: 'stroke-dashoffset 0.6s ease-out' }}
+        />
+        <text
+          x="48"
+          y="48"
+          textAnchor="middle"
+          dominantBaseline="central"
+          transform="rotate(90 48 48)"
+          className={cx('fill-current text-2xl font-bold tabular-nums', tone.text)}
+        >
+          {clamped}
+        </text>
+      </svg>
+      <div>
+        <div className="text-sm font-medium text-zinc-200">{label}</div>
+        <div className="text-xs text-zinc-500">0 = safe · 100 = severe</div>
+      </div>
+    </div>
+  );
+}
+
+const CHECK_STEPS = ['tls', 'headers', 'email', 'cookies'] as const;
+
+const CHECK_STEP_LABELS: Record<(typeof CHECK_STEPS)[number], Record<'ar' | 'fr' | 'en', string>> = {
+  tls: { ar: 'الشهادة الأمنية (HTTPS)', fr: 'Certificat HTTPS', en: 'HTTPS certificate' },
+  headers: { ar: 'رؤوس الأمان', fr: "En-têtes de sécurité", en: 'Security headers' },
+  email: { ar: 'حماية البريد (SPF/DMARC)', fr: 'Protection email (SPF/DMARC)', en: 'Email auth (SPF/DMARC)' },
+  cookies: { ar: 'إعدادات الكوكيز', fr: 'Paramètres des cookies', en: 'Cookie settings' },
+};
+
+/** Live-looking checklist shown while the 4 passive checks run server-side. */
+export function CheckingProgress({ language }: { language: 'ar' | 'fr' | 'en' }) {
+  return (
+    <div className={cx(CARD, 'space-y-3 p-5')}>
+      {CHECK_STEPS.map((step, i) => (
+        <div key={step} className="flex items-center gap-3 text-sm text-zinc-300">
+          <span
+            className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent"
+            style={{ animationDelay: `${i * 120}ms` }}
+          />
+          {CHECK_STEP_LABELS[step][language]}
+        </div>
+      ))}
     </div>
   );
 }
