@@ -71,11 +71,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResponse | null>(null);
+  const [lastCheckedDomain, setLastCheckedDomain] = useState<string | null>(null);
 
   const t = UI_TEXT[language];
   const dir = language === 'ar' ? 'rtl' : 'ltr';
 
-  async function runCheck(targetDomain: string) {
+  async function runCheck(targetDomain: string, targetLanguage: ReportLanguage) {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -83,13 +84,14 @@ export default function Home() {
       const res = await fetch('/api/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: targetDomain, consent: true, language }),
+        body: JSON.stringify({ domain: targetDomain, consent: true, language: targetLanguage }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Unknown error');
       } else {
         setResult(data);
+        setLastCheckedDomain(targetDomain);
       }
     } catch {
       setError('Network error — check your connection and try again.');
@@ -101,7 +103,22 @@ export default function Home() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!consent || !domain.trim()) return;
-    runCheck(domain.trim());
+    runCheck(domain.trim(), language);
+  }
+
+  /**
+   * The report's findings/impact/fix text is written once, in one language,
+   * by the AI at check time — switching the `language` state alone only
+   * re-renders the static UI chrome (buttons, labels), NOT that stored
+   * text. So if a report is already showing, re-run the check in the new
+   * language instead of leaving stale-language text next to a
+   * newly-relabelled UI.
+   */
+  function onLanguageChange(next: ReportLanguage) {
+    setLanguage(next);
+    if (lastCheckedDomain && !loading) {
+      runCheck(lastCheckedDomain, next);
+    }
   }
 
   return (
@@ -117,7 +134,7 @@ export default function Home() {
             <button
               key={lng}
               type="button"
-              onClick={() => setLanguage(lng)}
+              onClick={() => onLanguageChange(lng)}
               className={cx(
                 'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors',
                 language === lng
@@ -171,7 +188,7 @@ export default function Home() {
             onClick={() => {
               setDomain(DEMO_DOMAIN);
               setConsent(true);
-              runCheck(DEMO_DOMAIN);
+              runCheck(DEMO_DOMAIN, language);
             }}
             className="text-xs text-zinc-500 underline decoration-zinc-600 underline-offset-4 hover:text-zinc-300"
           >
