@@ -1,5 +1,6 @@
 // Records a real screen video of the live app doing the exact demo flow
 // described in VIDEO.md, timed to roughly match the ~71s narration.
+// English first (default demo language), then French. No Arabic in this cut.
 const { chromium } = require('playwright');
 
 const URL = 'https://app-sigma-nine-87.vercel.app/';
@@ -15,16 +16,21 @@ async function main() {
 
   // --- 0:00–0:15  Empty landing page (the "problem" beat) ---
   await page.goto(URL, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(9000);
+  await page.waitForTimeout(2000);
 
-  // --- 0:15–0:55  Type domain, pick Arabic, run check, show result ---
+  // Switch to English first (page defaults to Arabic)
+  const enBtn = page.locator('button', { hasText: 'English' });
+  await enBtn.click();
+  await page.waitForTimeout(6000);
+
+  // --- 0:15–0:55  Type domain, run check, show English result ---
   await page.click('#domain');
   await page.type('#domain', 'demo.testfire.net', { delay: 60 });
   await page.click('input[type=checkbox]');
   await page.waitForTimeout(500);
   await page.click('button[type=submit]');
   // Wait for the report to actually appear (AI call can take a few seconds)
-  await page.waitForSelector('text=درجة الخطر', { timeout: 30000 }).catch(() => {});
+  await page.waitForSelector('text=Risk score', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(4000);
 
   // Scroll down slowly to show the action plan + findings
