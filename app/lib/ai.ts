@@ -10,6 +10,7 @@ import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Finding, ReportLanguage } from './types';
 import { parseLlmOutput, assertKnownFindingIds, type LlmReport } from './schema';
+import { findingText } from './finding-text';
 
 const LANGUAGE_NAME: Record<ReportLanguage, string> = {
   ar: 'Arabic',
@@ -147,9 +148,22 @@ function stripFence(text: string): string {
   return fenced ? fenced[1] : trimmed;
 }
 
-/** Deterministic, key-free fallback: templated copy, honestly not AI-authored. */
+/**
+ * Deterministic, key-free fallback — honestly not AI-authored.
+ *
+ * Uses the hand-written localized advice in `finding-text.ts`, so a report
+ * produced with no API key, an exhausted quota or no network at all is still
+ * specific, actionable and in the reader's own language. The previous version
+ * spliced the finding's English title into a template, which produced
+ * sentences like "قد يعرّض هذا نشاطك التجاري للخطر: Missing referrer-policy
+ * header." — Arabic wrapping around English jargon, for a reader who may not
+ * read English at all.
+ *
+ * Only a finding kind with no entry in that table falls back to the old
+ * generic wording, so a newly added check still produces a usable sentence.
+ */
 function localAdvisor(findings: Finding[], language: ReportLanguage): LlmReport {
-  const templates: Record<ReportLanguage, (f: Finding) => { impact: string; fix: string }> = {
+  const generic: Record<ReportLanguage, (f: Finding) => { impact: string; fix: string }> = {
     en: (f) => ({
       impact: `This may expose your business to risk: ${f.title.toLowerCase()}.`,
       fix: `Ask your web developer to address: ${f.title.toLowerCase()}.`,
@@ -163,10 +177,14 @@ function localAdvisor(findings: Finding[], language: ReportLanguage): LlmReport 
       fix: `اطلب من مطوّر موقعك معالجة: ${f.title}.`,
     }),
   };
-  const templater = templates[language];
+
   return {
     language,
-    findings: findings.map((f) => ({ id: f.id, ...templater(f) })),
+    findings: findings.map((f) => {
+      const text = findingText(f.id, language);
+      if (text) return { id: f.id, impact: text.impact, fix: text.fix };
+      return { id: f.id, ...generic[language](f) };
+    }),
   };
 }
 

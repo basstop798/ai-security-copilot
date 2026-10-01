@@ -5,6 +5,7 @@ import { groundFindings } from '@/lib/grounding';
 import { writeReport } from '@/lib/ai';
 import { computeRiskScore, buildActionPlan } from '@/lib/score';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { localizedTitle } from '@/lib/finding-text';
 import { DEMO_DOMAIN, DEMO_GROUNDED_FINDINGS } from '@/lib/demo-data';
 import type { CopilotReport, GroundedFinding, ReportLanguage } from '@/lib/types';
 
@@ -91,8 +92,12 @@ export async function POST(request: Request) {
   const textById = new Map(llmReport.findings.map((f) => [f.id, f]));
   const sourceById = new Map(grounded.map((g) => [g.finding.id, g.sourceUrl]));
 
+  // The checks write their titles in English (they double as machine labels),
+  // so swap in the localized title for display. Severity, id and category are
+  // untouched.
   const findings: GroundedFinding[] = grounded.map((g) => ({
     ...g.finding,
+    title: localizedTitle(g.finding.id, language, g.finding.title),
     impact: textById.get(g.finding.id)?.impact || '',
     fix: textById.get(g.finding.id)?.fix || '',
     sourceUrl: sourceById.get(g.finding.id) || g.sourceUrl,

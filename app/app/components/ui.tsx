@@ -62,7 +62,21 @@ export function SeverityBadge({ severity, language }: { severity: Severity; lang
   );
 }
 
-export function RiskGauge({ score, label }: { score: number; label: string }) {
+const GAUGE_SCALE: Record<'ar' | 'fr' | 'en', string> = {
+  ar: '0 = آمن · 100 = خطر شديد',
+  fr: '0 = sûr · 100 = grave',
+  en: '0 = safe · 100 = severe',
+};
+
+export function RiskGauge({
+  score,
+  label,
+  language,
+}: {
+  score: number;
+  label: string;
+  language: 'ar' | 'fr' | 'en';
+}) {
   const tone =
     score >= 70
       ? { text: 'text-rose-400', ring: '#fb7185' }
@@ -104,7 +118,7 @@ export function RiskGauge({ score, label }: { score: number; label: string }) {
       </svg>
       <div>
         <div className="text-sm font-medium text-zinc-200">{label}</div>
-        <div className="text-xs text-zinc-500">0 = safe · 100 = severe</div>
+        <div className="text-xs text-zinc-500">{GAUGE_SCALE[language]}</div>
       </div>
     </div>
   );

@@ -231,7 +231,7 @@ export default function Home() {
 
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-4">
-              <RiskGauge score={result.report.riskScore} label={t.riskScore} />
+              <RiskGauge score={result.report.riskScore} label={t.riskScore} language={language} />
               <div className="text-xs text-zinc-500">
                 {t.poweredBy}: <span className="font-mono text-zinc-400">{result.meta.aiProvider}</span>
               </div>
