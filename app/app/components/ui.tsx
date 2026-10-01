@@ -159,6 +159,68 @@ export function Spinner() {
   );
 }
 
+/**
+ * Scope disclosure. Four passive checks cannot tell anyone their site is
+ * safe, so the report must say plainly what it did not look at — otherwise a
+ * low risk score reads as "my site is fine", which is the most harmful thing
+ * a security tool can imply.
+ */
+const NOT_CHECKED: Record<'ar' | 'fr' | 'en', { title: string; intro: string; items: string[] }> = {
+  ar: {
+    title: 'ما لم نفحصه',
+    intro:
+      'هذا فحص سطحي من الخارج، يغطي أربعة أمور فقط. الدرجة المنخفضة لا تعني أن موقعك آمن تماماً. لم نفحص:',
+    items: [
+      'الثغرات داخل كود الموقع (مثل SQL injection أو XSS)',
+      'قوة كلمات المرور أو أمان لوحة التحكم',
+      'الفيروسات أو الملفات الضارة على الموقع',
+      'إصدارات برامج السيرفر أو المنافذ المفتوحة',
+      'النسخ الاحتياطية وأمان الاستضافة نفسها',
+    ],
+  },
+  fr: {
+    title: "Ce que nous n'avons pas vérifié",
+    intro:
+      "Cette vérification est passive, vue de l'extérieur, et ne couvre que quatre domaines. Un score faible ne signifie pas que votre site est sûr. Nous n'avons pas vérifié :",
+    items: [
+      'Les failles dans le code du site (injection SQL, XSS)',
+      "La solidité des mots de passe ou la sécurité de l'espace d'administration",
+      'Les virus ou fichiers malveillants présents sur le site',
+      'Les versions des logiciels du serveur ou les ports ouverts',
+      "Les sauvegardes et la sécurité de l'hébergement lui-même",
+    ],
+  },
+  en: {
+    title: 'What we did NOT check',
+    intro:
+      'This is a passive check from the outside and covers four areas only. A low score does not mean your site is safe. We did not check:',
+    items: [
+      'Weaknesses inside your website code (SQL injection, XSS)',
+      'Password strength or admin-panel security',
+      'Viruses or malicious files on the site',
+      'Server software versions or open ports',
+      'Backups and the security of the hosting itself',
+    ],
+  },
+};
+
+export function NotCheckedPanel({ language }: { language: 'ar' | 'fr' | 'en' }) {
+  const t = NOT_CHECKED[language];
+  return (
+    <Panel title={t.title}>
+      <p className="mb-3 text-xs text-zinc-500">{t.intro}</p>
+      <ul className="space-y-1.5">
+        {t.items.map((item) => (
+          <li key={item} className="flex gap-2 text-sm text-zinc-400">
+            <span className="text-zinc-600">✕</span>
+            {item}
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
 const CATEGORY_LABELS: Record<'tls' | 'headers' | 'email' | 'cookies', Record<'ar' | 'fr' | 'en', string>> = {
   tls: { ar: 'الشهادة والتشفير', fr: 'Certificat & chiffrement', en: 'Certificate & encryption' },
   headers: { ar: 'رؤوس الأمان', fr: 'En-têtes de sécurité', en: 'Security headers' },

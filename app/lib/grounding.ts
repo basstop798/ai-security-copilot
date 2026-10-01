@@ -1,8 +1,23 @@
 /**
- * Deterministic grounding: attach a real citation (from cve-kb.json)
- * to each raw Finding by keyword matching. The LLM never invents CVEs or
- * decides severity — grounding can only ever RAISE severity, never lower it
- * (worstOf), because the underlying check already observed the problem.
+ * Deterministic grounding: attach a real citation (from cve-kb.json) to each
+ * raw Finding.
+ *
+ * The mapping is EXPLICIT: every finding kind our checks can produce names
+ * exactly one knowledge-base entry (see FINDING_KIND_TO_KB below). There is
+ * no keyword or substring matching, because that cannot be made safe —
+ * a finding's `detail` text contains live values (certificate day counts,
+ * cookie names, SPF records) which would collide with KB keywords and cite
+ * an unrelated vulnerability. A real example from the previous version:
+ * "Certificate expires in 21 day(s)" matched a KB entry keyed on port "21"
+ * and was reported as the vsftpd 2.3.4 backdoor at CRITICAL severity.
+ *
+ * Severity is NOT decided here. It belongs to the check that made the
+ * observation (checks.ts), because only the check knows the actual
+ * condition — "expires in 21 days" (medium) and "expired 97 days ago"
+ * (critical) are the same class of issue with very different urgency.
+ * Grounding adds a citation and nothing else, so it can never inflate a
+ * score. `citedSeverity` reports the knowledge base's own generic severity
+ * for that class of issue, for transparency only.
  */
 
 import type { Finding, Severity } from './types';
@@ -10,16 +25,13 @@ import type { Finding, Severity } from './types';
 // bundled into the serverless function and works on Vercel, where only
 // app/ is deployed — a relative-path readFileSync into ../prep would 404
 // with ENOENT in production even though it works when run locally from a
-// full git checkout. This file is a build-time copy of prep/cve-kb.json;
-// see CLAUDE.md "Keep in sync" note if the source KB changes.
+// full git checkout. This file is a build-time copy of prep/cve-kb.json.
 import kbData from './cve-kb.json';
 
 type KbEntry = {
   id: string;
   title: string;
-  service: string;
-  affected: string;
-  keywords: string[];
+  /** The knowledge base's generic severity for this class of issue. */
   severity: Severity;
   summary: string;
   remediation: string[];
@@ -34,45 +46,77 @@ const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
-/** Never downgrade: the higher-ranked severity always wins. */
+/**
+ * The worse of two severities. No longer used by groundFinding (grounding
+ * never changes a severity) but kept as a tested helper for comparing
+ * severities elsewhere.
+ */
 export function worstOf(a: Severity, b: Severity): Severity {
   return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
 }
 
-let cachedKb: KbEntry[] | null = null;
+/**
+ * Every finding kind checks.ts can produce -> the one knowledge-base entry
+ * that documents exactly that condition.
+ *
+ * Cookie findings carry the live cookie name in their id
+ * (`cookie-JSESSIONID-no-secure`), so they are keyed by their stable suffix
+ * instead; see findingKind().
+ *
+ * `headers-unreachable` is deliberately absent: "the homepage did not
+ * respond" is a failed measurement, not a security weakness, so there is
+ * nothing honest to cite for it.
+ */
+const FINDING_KIND_TO_KB: Record<string, string> = {
+  // --- TLS / transport ---
+  'tls-no-https': 'CWE-319-NO-HTTPS',
+  'tls-cert-expired': 'CWE-295-CERT-EXPIRED',
+  'tls-cert-expiring-soon': 'CERT-EXPIRING-SOON',
+  'tls-http-not-redirected': 'CWE-319-NO-HTTPS',
+  'headers-served-over-http': 'CWE-319-NO-HTTPS',
 
-function loadKb(): KbEntry[] {
-  if (cachedKb) return cachedKb;
-  cachedKb = kbData as KbEntry[];
-  return cachedKb;
-}
+  // --- Security headers ---
+  'header-missing-hsts': 'CWE-693-HEADERS',
+  'header-missing-csp': 'CWE-693-HEADERS',
+  'header-missing-x-frame-options': 'CWE-693-HEADERS',
+  'header-missing-x-content-type-options': 'CWE-693-HEADERS',
+  'header-missing-referrer-policy': 'CWE-693-HEADERS',
 
-export type GroundingMatch = {
-  entry: KbEntry;
-  score: number;
+  // --- Email authentication ---
+  'email-no-spf': 'SPF-MISSING',
+  'email-spf-permissive': 'SPF-PERMISSIVE',
+  'email-no-dmarc': 'DMARC-MISSING',
+  'email-dmarc-p-none': 'DMARC-NONE',
+
+  // --- Cookie flags (keyed by suffix, see findingKind) ---
+  'cookie-no-httponly': 'CWE-1004-COOKIE-HTTPONLY',
+  'cookie-no-secure': 'CWE-614-COOKIE-SECURE',
+  'cookie-no-samesite': 'CWE-352-SAMESITE',
 };
 
-/** Score = number of KB keywords found (case-insensitive) in title+detail. */
-function scoreEntry(finding: Finding, entry: KbEntry): number {
-  const haystack = `${finding.title} ${finding.detail}`.toLowerCase();
-  let score = 0;
-  for (const kw of entry.keywords) {
-    if (haystack.includes(kw.toLowerCase())) score += 1;
-  }
-  return score;
-}
+/** Finding kinds that intentionally have no citation. */
+const UNCITED_FINDING_KINDS = new Set(['headers-unreachable']);
 
-/** Best-matching KB entry for a finding, or null if nothing scores > 0. */
-export function findBestMatch(finding: Finding): GroundingMatch | null {
-  const kb = loadKb();
-  let best: GroundingMatch | null = null;
-  for (const entry of kb) {
-    const score = scoreEntry(finding, entry);
-    if (score > 0 && (!best || score > best.score)) {
-      best = { entry, score };
+/**
+ * Reduce a finding id to its stable kind. Cookie ids embed the live cookie
+ * name (`cookie-<name>-no-secure`), which must not take part in the lookup.
+ */
+export function findingKind(findingId: string): string {
+  if (findingId.startsWith('cookie-')) {
+    for (const flag of ['no-httponly', 'no-secure', 'no-samesite']) {
+      if (findingId.endsWith(`-${flag}`)) return `cookie-${flag}`;
     }
   }
-  return best;
+  return findingId;
+}
+
+let cachedKb: Map<string, KbEntry> | null = null;
+
+function kbById(): Map<string, KbEntry> {
+  if (!cachedKb) {
+    cachedKb = new Map((kbData as KbEntry[]).map((entry) => [entry.id, entry]));
+  }
+  return cachedKb;
 }
 
 export type GroundedResult = {
@@ -81,30 +125,45 @@ export type GroundedResult = {
   citedSeverity: Severity;
 };
 
+/** Used when a finding kind has no (or an unresolvable) citation. */
 const FALLBACK_SOURCE_URL = 'https://cwe.mitre.org/';
 
+/** The knowledge-base entry that documents this finding, or null. */
+export function findKbEntry(finding: Finding): KbEntry | null {
+  const kbId = FINDING_KIND_TO_KB[findingKind(finding.id)];
+  if (!kbId) return null;
+  const entry = kbById().get(kbId);
+  if (!entry) {
+    // A mapping points at an id that is not in the KB file — a packaging
+    // bug, not a user-facing condition. Fail loudly in the log, degrade to
+    // the generic citation rather than breaking the report.
+    console.error(`[grounding] mapped KB entry "${kbId}" is missing from cve-kb.json`);
+    return null;
+  }
+  return entry;
+}
+
 /**
- * Ground one finding: look up the best KB match, take the worse of the two
- * severities, and return a citation URL. If nothing matches, keep the
- * check's own severity and fall back to a generic reference (never leave
- * a finding uncited).
+ * Ground one finding: attach the citation for its kind. The finding itself
+ * — severity included — is returned unchanged.
  */
 export function groundFinding(finding: Finding): GroundedResult {
-  const match = findBestMatch(finding);
-  if (!match) {
-    return {
-      finding,
-      sourceUrl: FALLBACK_SOURCE_URL,
-      citedSeverity: finding.severity,
-    };
+  const entry = findKbEntry(finding);
+  if (!entry) {
+    if (!UNCITED_FINDING_KINDS.has(findingKind(finding.id))) {
+      // An unmapped finding kind means checks.ts grew a new finding and
+      // nobody added its citation. Surfaced in the log so it is caught in
+      // development instead of silently shipping an uncited finding.
+      console.error(`[grounding] no KB mapping for finding kind "${findingKind(finding.id)}"`);
+    }
+    return { finding, sourceUrl: FALLBACK_SOURCE_URL, citedSeverity: finding.severity };
   }
-  return {
-    finding: { ...finding, severity: worstOf(finding.severity, match.entry.severity) },
-    sourceUrl: match.entry.reference,
-    citedSeverity: match.entry.severity,
-  };
+  return { finding, sourceUrl: entry.reference, citedSeverity: entry.severity };
 }
 
 export function groundFindings(findings: Finding[]): GroundedResult[] {
   return findings.map(groundFinding);
 }
+
+/** Exported for tests: the full finding-kind -> KB-entry mapping. */
+export const GROUNDING_MAP: Readonly<Record<string, string>> = FINDING_KIND_TO_KB;

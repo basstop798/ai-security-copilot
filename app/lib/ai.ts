@@ -17,6 +17,23 @@ const LANGUAGE_NAME: Record<ReportLanguage, string> = {
   en: 'English',
 };
 
+/**
+ * Neither SDK applies a default timeout, so a provider that accepts the
+ * connection and then stalls will hang the whole report indefinitely —
+ * observed locally: a Gemini call sat for over a minute with the UI stuck on
+ * "Checking..." and nothing in the log. Two layers guard against it:
+ *
+ *  - AI_CALL_TIMEOUT_MS: per HTTP call, passed to each SDK.
+ *  - AI_TOTAL_BUDGET_MS: for the whole provider chain (both providers, their
+ *    retries and backoff). When it runs out we stop waiting and return the
+ *    local rule-based summary, which needs no network at all.
+ *
+ * A report that is a few seconds late is a bug; a report that never arrives
+ * is a broken product.
+ */
+const AI_CALL_TIMEOUT_MS = Number(process.env.AI_CALL_TIMEOUT_MS || 12_000);
+const AI_TOTAL_BUDGET_MS = Number(process.env.AI_TOTAL_BUDGET_MS || 30_000);
+
 function buildPrompt(findings: Finding[], language: ReportLanguage): string {
   const langName = LANGUAGE_NAME[language];
   const findingsJson = JSON.stringify(
@@ -47,7 +64,12 @@ async function callNvidia(findings: Finding[], language: ReportLanguage): Promis
   if (!apiKey) throw new Error('NVIDIA_API_KEY not set');
   const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-8b-instruct';
 
-  const client = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+  const client = new OpenAI({
+    apiKey,
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+    timeout: AI_CALL_TIMEOUT_MS,
+    maxRetries: 0, // the provider chain below handles fallback
+  });
   const completion = await client.chat.completions.create({
     model,
     messages: [{ role: 'user', content: buildPrompt(findings, language) }],
@@ -78,7 +100,7 @@ async function callGeminiModel(genAI: GoogleGenerativeAI, modelName: string, pro
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const result = await model.generateContent(prompt);
+      const result = await model.generateContent(prompt, { timeout: AI_CALL_TIMEOUT_MS });
       const text = result.response.text();
       if (!text) throw new Error('Gemini returned an empty response');
       return text;
@@ -160,6 +182,25 @@ export type AiResult = {
  * a full report — this is what keeps the live demo unbreakable.
  */
 export async function writeReport(findings: Finding[], language: ReportLanguage): Promise<AiResult> {
+  // Hard deadline for the whole chain: whatever the providers do, the caller
+  // gets a complete report. The local advisor is synchronous and needs no
+  // network, so this race can only ever end in a usable report.
+  const budget = new Promise<AiResult>((resolve) => {
+    setTimeout(() => {
+      console.error(
+        `[ai] total AI budget of ${AI_TOTAL_BUDGET_MS}ms exhausted — returning the local template advisor`,
+      );
+      resolve({ report: localAdvisor(findings, language), provider: 'local' });
+    }, AI_TOTAL_BUDGET_MS).unref?.();
+  });
+
+  return Promise.race([writeReportFromProviders(findings, language), budget]);
+}
+
+async function writeReportFromProviders(
+  findings: Finding[],
+  language: ReportLanguage,
+): Promise<AiResult> {
   const knownIds = findings.map((f) => f.id);
 
   const attempts: { name: 'nvidia' | 'gemini'; call: (p: string) => Promise<string> }[] = [
@@ -201,7 +242,12 @@ async function callNvidiaRaw(prompt: string): Promise<string> {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY not set');
   const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-8b-instruct';
-  const client = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+  const client = new OpenAI({
+    apiKey,
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+    timeout: AI_CALL_TIMEOUT_MS,
+    maxRetries: 0,
+  });
   const completion = await client.chat.completions.create({
     model,
     messages: [{ role: 'user', content: prompt }],

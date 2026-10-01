@@ -1,7 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { CARD, CategorySummary, CheckingProgress, Panel, RiskGauge, SeverityBadge, cx } from './components/ui';
+import {
+  CARD,
+  CategorySummary,
+  CheckingProgress,
+  NotCheckedPanel,
+  Panel,
+  RiskGauge,
+  SeverityBadge,
+  cx,
+} from './components/ui';
 import { DEMO_DOMAIN } from '@/lib/demo-data';
 import type { CopilotReport, ReportLanguage } from '@/lib/types';
 
@@ -271,6 +280,8 @@ export default function Home() {
               ))}
             </ul>
           </Panel>
+
+          <NotCheckedPanel language={language} />
         </div>
       )}
     </div>

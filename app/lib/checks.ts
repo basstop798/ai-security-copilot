@@ -228,13 +228,18 @@ export async function checkHeaders(
 ): Promise<Finding[]> {
   const result = fetched !== undefined ? fetched : await fetchHomepage(hostname);
   if (!result) {
+    // Severity 'info', NOT a vulnerability severity: we failed to measure
+    // the site, we did not observe a weakness in it. Scoring this as 'high'
+    // (as an earlier version did) added 25 risk points to any site that was
+    // merely offline or behind a slow connection, which is a false result.
     return [
       {
         id: 'headers-unreachable',
         category: 'headers',
-        severity: 'high',
-        title: 'Homepage did not respond',
-        detail: 'Neither HTTPS nor HTTP returned a response within the timeout.',
+        severity: 'info',
+        title: 'Could not check the security headers',
+        detail:
+          'Neither HTTPS nor HTTP returned a response within the timeout, so the security headers could not be read. This is not a result about the site, only about this check.',
       },
     ];
   }
