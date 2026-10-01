@@ -33,6 +33,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Next.js generates the route-aware globals (LayoutProps, PageProps)
+      # into .next/types, which is gitignored. app/layout.tsx uses
+      # LayoutProps<"/">, so on a clean checkout tsc fails with
+      # "Cannot find name 'LayoutProps'" until they exist. typegen is much
+      # cheaper than a full build, so the type check still runs first.
+      - name: Generate route types
+        run: npx next typegen
+
       # Run before the build: tsc reports every type error, whereas a failed
       # build can stop at the first one.
       - name: Type check
