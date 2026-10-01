@@ -4,9 +4,11 @@
  * demo.testfire.net (IBM's public "Altoro Mutual" security-testing site).
  * Not synthetic data: this is a snapshot of a genuine passive scan.
  *
- * Served by /api/check whenever the live check fails (target down, network
- * issue during the demo) so the jury still sees a full, real report.
- * See CLAUDE.md "Demo targets" and prep/demo-targets.md.
+ * Served by /api/check ONLY for this one domain, and only when its live
+ * check fails (target down, network issue), so a demo of a known-vulnerable
+ * site still shows a full, real report. Any other domain gets a live result
+ * or an error — pre-captured data is never presented as a live scan, and the
+ * UI labels it when it is used.
  */
 
 import type { Finding } from './types';

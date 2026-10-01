@@ -22,10 +22,11 @@
 
 import type { Finding, Severity } from './types';
 // Statically imported (not readFileSync'd from a repo-root path) so it gets
-// bundled into the serverless function and works on Vercel, where only
-// app/ is deployed — a relative-path readFileSync into ../prep would 404
-// with ENOENT in production even though it works when run locally from a
-// full git checkout. This file is a build-time copy of prep/cve-kb.json.
+// bundled into the serverless function and works on Vercel, where only app/
+// is deployed — an earlier version read this file from a repo-root-relative
+// path, which worked locally from a full checkout but threw ENOENT in
+// production. This file is the single source of truth for citations; there is
+// deliberately no second copy to drift out of sync with it.
 import kbData from './cve-kb.json';
 
 type KbEntry = {
